@@ -3,14 +3,22 @@
      xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
      xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>My Daily Digest</title>
+    <title>AI News for Zara</title>
     <link>https://zarazhangrui.github.io/my-podcast-feed</link>
     <description>A personalized AI-generated podcast that remixes your favorite newsletters and feeds into an engaging daily show.</description>
     <language>en</language>
     <atom:link href="https://zarazhangrui.github.io/my-podcast-feed/feed.xml" rel="self" type="application/rss+xml"/>
 
+    <!-- Show artwork -->
+    <image>
+      <url>https://zarazhangrui.github.io/my-podcast-feed/cover-art.png</url>
+      <title>AI News for Zara</title>
+      <link>https://zarazhangrui.github.io/my-podcast-feed</link>
+    </image>
+    <itunes:image href="https://zarazhangrui.github.io/my-podcast-feed/cover-art.png"/>
+
     <!-- iTunes/Podcast player metadata -->
-    <itunes:author>My Daily Digest</itunes:author>
+    <itunes:author>AI News for Zara</itunes:author>
     <itunes:summary>A personalized AI-generated podcast that remixes your favorite newsletters and feeds into an engaging daily show.</itunes:summary>
     <itunes:category text="Technology"/>
     <itunes:explicit>false</itunes:explicit>
