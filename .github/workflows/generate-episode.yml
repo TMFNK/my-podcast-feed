@@ -76,8 +76,16 @@ jobs:
             max_episodes: 30
           EOF
 
+      - name: Restore state from repo
+        run: |
+          # If state.json exists in the repo, use it so we know when we last ran
+          if [ -f state.json ]; then
+            cp state.json ~/.claude/personalized-podcast/state.json
+            echo "Restored state from repo"
+          fi
+
       - name: Run pipeline (fetch + remix + speak)
-        run: python ~/.claude/skills/personalized-podcast/scripts/run_pipeline.py --skip-publish
+        run: python ~/.claude/skills/personalized-podcast/scripts/run_pipeline.py --skip-publish --lookback-hours 72
 
       - name: Publish episode to GitHub Pages
         run: |
@@ -143,7 +151,9 @@ jobs:
           # Commit and push
           git config user.name "Podcast Bot"
           git config user.email "bot@noreply.github.com"
-          git add episodes/ episodes.json feed.xml
+          # Save pipeline state so next run knows when we last processed
+          cp ~/.claude/personalized-podcast/state.json ./state.json 2>/dev/null || true
+          git add episodes/ episodes.json feed.xml state.json
           git commit -m "Add episode: $(date +%Y-%m-%d)" || echo "Nothing to commit"
           git push
 

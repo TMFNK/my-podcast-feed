@@ -52,6 +52,12 @@ def main():
         action="store_true",
         help="Skip the publish stage (useful for CI where publishing is handled separately)",
     )
+    parser.add_argument(
+        "--lookback-hours",
+        type=int,
+        default=None,
+        help="Override the default lookback window for first runs (default: 24 hours)",
+    )
     args = parser.parse_args()
 
     # Initialize everything
@@ -93,7 +99,7 @@ def main():
         logger.info("\n--- Stage 1: FETCH ---")
         from fetch import fetch_feeds
 
-        articles = fetch_feeds(config, state, logger)
+        articles = fetch_feeds(config, state, logger, lookback_hours=args.lookback_hours)
 
         if not articles:
             logger.info("No new articles found. Skipping episode generation.")

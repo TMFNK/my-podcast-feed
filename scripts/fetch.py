@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from utils import get_data_dir, load_config, load_env, read_state, setup_logging
 
 
-def fetch_feeds(config, state, logger=None):
+def fetch_feeds(config, state, logger=None, lookback_hours=None):
     """
     Fetches new articles from all RSS feeds in the config.
 
@@ -60,9 +60,11 @@ def fetch_feeds(config, state, logger=None):
         cutoff = datetime.fromisoformat(state["last_run"])
         logger.info(f"Fetching articles newer than {cutoff.isoformat()}")
     else:
-        # First run ever — grab the last 24 hours of content
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-        logger.info("First run — fetching articles from the last 24 hours")
+        # First run ever — use lookback_hours or default to 72 hours
+        # (72h covers a 3-day schedule with margin)
+        hours = lookback_hours or 72
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        logger.info(f"First run — fetching articles from the last {hours} hours")
 
     # Make sure cutoff is timezone-aware (has UTC info)
     if cutoff.tzinfo is None:
