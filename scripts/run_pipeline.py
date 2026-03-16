@@ -47,6 +47,11 @@ def main():
         "--config-path",
         help="Path to config.yaml (default: ~/.claude/personalized-podcast/config.yaml)",
     )
+    parser.add_argument(
+        "--skip-publish",
+        action="store_true",
+        help="Skip the publish stage (useful for CI where publishing is handled separately)",
+    )
     args = parser.parse_args()
 
     # Initialize everything
@@ -146,7 +151,7 @@ def main():
     # =========================================================
     # Stage 4: PUBLISH — Push to GitHub Pages
     # =========================================================
-    if start_index <= 3:
+    if start_index <= 3 and not args.skip_publish:
         logger.info("\n--- Stage 4: PUBLISH ---")
         from publish import publish_episode
 
