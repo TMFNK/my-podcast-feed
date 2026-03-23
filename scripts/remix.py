@@ -23,6 +23,18 @@ from utils import get_data_dir, load_config, load_env, read_state, setup_logging
 
 # Templates live at <repo_root>/templates/, one level above scripts/
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+OPENCODE_DEFAULT_BASE_URL = "https://opencode.ai/zen"
+OPENCODE_RESPONSES_PREFIXES = ("gpt-",)
+OPENCODE_MESSAGES_PREFIXES = ("claude-",)
+OPENCODE_CHAT_COMPLETIONS_PREFIXES = (
+    "big-pickle",
+    "glm-",
+    "kimi-",
+    "mimo-",
+    "minimax-",
+    "nemotron-",
+    "qwen-",
+)
 
 
 def generate_script(articles, config, logger=None):
@@ -91,9 +103,10 @@ def generate_script(articles, config, logger=None):
     api_key_env = llm_config.get("api_key_env", "ANTHROPIC_API_KEY")
     api_key = os.environ.get(api_key_env)
     if not api_key:
+        env_path = data_dir / ".env"
         raise RuntimeError(
             f"API key not found in environment variable '{api_key_env}'.\n"
-            f"Make sure it's set in your .env file at ~/.claude/personalized-podcast/.env"
+            f"Make sure it's set in your .env file at {env_path}"
         )
 
     logger.info(f"Generating script with {provider} ({model})...")
@@ -115,7 +128,14 @@ def generate_script(articles, config, logger=None):
                     "No markdown, no code blocks, no explanation. Just the raw JSON array starting with [ and ending with ]."
                 )
 
-            raw_response = _call_llm(provider, model, api_key, prompt, logger)
+            raw_response = _call_llm(
+                provider,
+                model,
+                api_key,
+                prompt,
+                logger,
+                provider_options=llm_config,
+            )
             script = _parse_script(raw_response, num_hosts, logger)
 
             # Save the script to disk for potential TTS retry later
@@ -145,7 +165,104 @@ def generate_script(articles, config, logger=None):
                 )
 
 
-def _call_llm(provider, model, api_key, prompt, logger):
+def _normalize_opencode_model(model):
+    """Allows either raw Zen model ids or `opencode/<model-id>` values."""
+    return model.split("/", 1)[1] if model.startswith("opencode/") else model
+
+
+def _normalize_opencode_api_style(api_style):
+    """Normalizes style aliases into the internal naming used here."""
+    if not api_style:
+        return None
+
+    normalized = api_style.strip().lower().replace("-", "_")
+    aliases = {
+        "chat": "chat_completions",
+        "chat_completion": "chat_completions",
+        "chat_completions": "chat_completions",
+        "messages": "messages",
+        "responses": "responses",
+    }
+
+    if normalized not in aliases:
+        raise ValueError(
+            f"Unsupported OpenCode API style '{api_style}'. "
+            "Use one of: responses, messages, chat_completions."
+        )
+
+    return aliases[normalized]
+
+
+def _detect_opencode_api_style(model):
+    """
+    Routes OpenCode Zen models to the documented endpoint families.
+    """
+    if model.startswith(OPENCODE_RESPONSES_PREFIXES):
+        return "responses"
+    if model.startswith(OPENCODE_MESSAGES_PREFIXES):
+        return "messages"
+    if model.startswith(OPENCODE_CHAT_COMPLETIONS_PREFIXES):
+        return "chat_completions"
+
+    raise ValueError(
+        f"Unable to determine OpenCode API style for model '{model}'. "
+        "Set llm.api_style explicitly to one of: responses, messages, chat_completions."
+    )
+
+
+def _call_opencode_llm(model, api_key, prompt, provider_options):
+    """
+    Calls OpenCode Zen via the appropriate provider SDK based on model family.
+    """
+    normalized_model = _normalize_opencode_model(model)
+    base_url = provider_options.get("base_url", OPENCODE_DEFAULT_BASE_URL).rstrip("/")
+    api_style = _normalize_opencode_api_style(provider_options.get("api_style"))
+    api_style = api_style or _detect_opencode_api_style(normalized_model)
+
+    if api_style == "messages":
+        import anthropic
+
+        client = anthropic.Anthropic(
+            api_key=api_key,
+            base_url=f"{base_url}/v1",
+        )
+        response = client.messages.create(
+            model=normalized_model,
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
+
+    import openai
+
+    client = openai.OpenAI(
+        api_key=api_key,
+        base_url=f"{base_url}/v1",
+    )
+
+    if api_style == "responses":
+        response = client.responses.create(
+            model=normalized_model,
+            input=prompt,
+            max_output_tokens=8192,
+        )
+        return response.output_text
+
+    if api_style == "chat_completions":
+        response = client.chat.completions.create(
+            model=normalized_model,
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content
+
+    raise ValueError(
+        f"Unsupported OpenCode API style '{api_style}'. "
+        "Use one of: responses, messages, chat_completions."
+    )
+
+
+def _call_llm(provider, model, api_key, prompt, logger, provider_options=None):
     """
     Calls the LLM API and returns the raw text response.
 
@@ -153,6 +270,8 @@ def _call_llm(provider, model, api_key, prompt, logger):
     - "anthropic": Uses the Anthropic SDK (Claude models)
     - "openai": Uses the OpenAI SDK (GPT models)
     """
+    provider_options = provider_options or {}
+
     if provider == "anthropic":
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
@@ -173,8 +292,13 @@ def _call_llm(provider, model, api_key, prompt, logger):
         )
         return response.choices[0].message.content
 
+    elif provider == "opencode":
+        return _call_opencode_llm(model, api_key, prompt, provider_options)
+
     else:
-        raise ValueError(f"Unknown LLM provider: '{provider}'. Use 'anthropic' or 'openai'.")
+        raise ValueError(
+            f"Unknown LLM provider: '{provider}'. Use 'anthropic', 'openai', or 'opencode'."
+        )
 
 
 def _parse_script(raw_response, num_hosts, logger):

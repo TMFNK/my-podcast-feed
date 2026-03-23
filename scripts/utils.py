@@ -19,41 +19,118 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+DATA_DIR_ENV_VAR = "PODCAST_DATA_DIR"
 
-def get_data_dir():
-    """
-    Returns the path to ~/.claude/personalized-podcast/ and creates it
-    (plus subdirectories) if it doesn't exist yet.
 
-    Think of this as the "home base" for all your podcast data —
-    config, logs, generated scripts, everything lives here.
+def get_repo_root():
+    """Returns the repository root directory."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _legacy_data_dir(home_dir=None):
+    """Returns the original legacy data directory path."""
+    home = Path(home_dir) if home_dir is not None else Path.home()
+    return home / ".claude" / "personalized-podcast"
+
+
+def _looks_like_repo_data_dir(repo_root):
     """
-    data_dir = Path.home() / ".claude" / "personalized-podcast"
-    # Create all the subdirectories we need
+    Detects repos that already store podcast state/assets at the project root.
+    """
+    repo_root = Path(repo_root)
+    markers = ["episodes", "feed.xml", "episodes.json", "state.json"]
+    return any((repo_root / marker).exists() for marker in markers)
+
+
+def _ensure_data_subdirs(data_dir):
+    """Creates the subdirectories required by the pipeline."""
+    data_dir = Path(data_dir)
     for subdir in ["logs", "scripts_output", "episodes"]:
         (data_dir / subdir).mkdir(parents=True, exist_ok=True)
     return data_dir
 
 
-def load_config(config_path=None):
+def _candidate_paths(filename, data_dir, repo_root, home_dir):
+    """
+    Builds an ordered list of possible file locations, preferring the selected
+    data directory but still allowing fallback to the legacy home path.
+    """
+    candidates = []
+    seen = set()
+
+    for base in [
+        Path(data_dir),
+        Path(repo_root),
+        _legacy_data_dir(home_dir),
+    ]:
+        candidate = base / filename
+        if candidate not in seen:
+            candidates.append(candidate)
+            seen.add(candidate)
+
+    return candidates
+
+
+def get_data_dir(data_dir=None, repo_root=None, home_dir=None):
+    """
+    Returns the active pipeline data directory and creates required subdirs.
+
+    Resolution order:
+    1. Explicit data_dir argument
+    2. PODCAST_DATA_DIR environment variable
+    3. Repo root, if this repo already stores podcast artifacts in-project
+    4. Legacy ~/.claude/personalized-podcast path
+    """
+    repo_root = Path(repo_root) if repo_root is not None else get_repo_root()
+
+    if data_dir is not None:
+        chosen_dir = Path(data_dir).expanduser()
+    else:
+        env_dir = os.environ.get(DATA_DIR_ENV_VAR)
+        if env_dir:
+            chosen_dir = Path(env_dir).expanduser()
+        elif _looks_like_repo_data_dir(repo_root):
+            chosen_dir = repo_root
+        else:
+            chosen_dir = _legacy_data_dir(home_dir)
+
+    try:
+        return _ensure_data_subdirs(chosen_dir)
+    except PermissionError:
+        if chosen_dir == repo_root:
+            raise
+        return _ensure_data_subdirs(repo_root)
+
+
+def load_config(config_path=None, data_dir=None, repo_root=None, home_dir=None):
     """
     Reads your config.yaml file and returns it as a Python dictionary.
 
     If no path is given, looks in the default location:
-    ~/.claude/personalized-podcast/config.yaml
+    - PODCAST_DATA_DIR/config.yaml when set
+    - repo_root/config.yaml for repo-local setups
+    - ~/.claude/personalized-podcast/config.yaml for legacy setups
 
     Raises a helpful error if the file is missing, so you know
     exactly what to do to fix it.
     """
     if config_path is None:
-        config_path = get_data_dir() / "config.yaml"
+        repo_root = Path(repo_root) if repo_root is not None else get_repo_root()
+        data_dir = get_data_dir(
+            data_dir=data_dir,
+            repo_root=repo_root,
+            home_dir=home_dir,
+        )
+        candidates = _candidate_paths("config.yaml", data_dir, repo_root, home_dir)
+        config_path = next((path for path in candidates if path.exists()), candidates[0])
     else:
         config_path = Path(config_path)
 
     if not config_path.exists():
         raise FileNotFoundError(
             f"Config file not found at {config_path}\n\n"
-            f"Create it at {config_path} — see the README for the full config reference:\n"
+            f"Create it at {config_path} or copy config.example.yaml into place. "
+            f"See the README for the full config reference:\n"
             f"  https://github.com/TMFNK/my-podcast-feed#setup"
         )
 
@@ -63,7 +140,7 @@ def load_config(config_path=None):
     return config
 
 
-def load_env(env_path=None):
+def load_env(env_path=None, data_dir=None, repo_root=None, home_dir=None):
     """
     Loads your .env file (which contains API keys) into the environment.
 
@@ -72,7 +149,14 @@ def load_env(env_path=None):
     variables that the API libraries can find automatically.
     """
     if env_path is None:
-        env_path = get_data_dir() / ".env"
+        repo_root = Path(repo_root) if repo_root is not None else get_repo_root()
+        data_dir = get_data_dir(
+            data_dir=data_dir,
+            repo_root=repo_root,
+            home_dir=home_dir,
+        )
+        candidates = _candidate_paths(".env", data_dir, repo_root, home_dir)
+        env_path = next((path for path in candidates if path.exists()), candidates[0])
     else:
         env_path = Path(env_path)
 
@@ -80,7 +164,7 @@ def load_env(env_path=None):
         raise FileNotFoundError(
             f"Environment file not found at {env_path}\n"
             f"Create it with your API keys:\n"
-            f"  ANTHROPIC_API_KEY=sk-ant-...\n"
+            f"  OPENAI_API_KEY=...\n"
         )
 
     load_dotenv(env_path)

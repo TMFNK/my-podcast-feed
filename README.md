@@ -5,7 +5,7 @@ Forked from [zarazhangrui/my-podcast-feed](https://github.com/zarazhangrui/my-po
 An automated 4-stage pipeline (Fetch → Remix → Speak → Publish) that converts RSS newsletter feeds into personalized podcast episodes using AI.
 
 - Pulls articles from configured RSS sources (e.g. Ben's Bites, Latent Space, Technically)
-- Generates a conversational podcast script via an LLM (Claude or GPT) using Jinja2 prompt templates
+- Generates a conversational podcast script via an LLM (Claude, GPT, or OpenCode Zen) using Jinja2 prompt templates
 - Converts the script to audio using Kokoro ONNX TTS with distinct voices per host
 - Publishes the MP3 and an updated RSS feed to GitHub Pages so podcast players auto-download new episodes
 - Runs on a 3-day GitHub Actions cron schedule or manually via CLI It fetches articles from configured sources, generates a natural-sounding podcast script with an LLM, converts it to audio via text-to-speech, and publishes it as a subscribable RSS feed on GitHub Pages.
@@ -15,7 +15,7 @@ An automated 4-stage pipeline (Fetch → Remix → Speak → Publish) that conve
 Each run of the pipeline executes four stages:
 
 1. **Fetch** — Pulls new articles from configured RSS feeds (e.g., tech newsletters, AI blogs). Filters out previously processed articles using a persistent state file.
-2. **Remix** — Sends the fetched articles to an LLM (Anthropic Claude or OpenAI GPT) with a prompt template that instructs it to write a podcast conversation script. Supports single-host monologue or two-host conversational formats.
+2. **Remix** — Sends the fetched articles to an LLM (Anthropic Claude, OpenAI GPT, or OpenCode Zen) with a prompt template that instructs it to write a podcast conversation script. Supports single-host monologue or two-host conversational formats.
 3. **Speak** — Converts each line of the script to audio using Kokoro ONNX text-to-speech (offline, no API needed). Each host gets a distinct voice. Audio segments are stitched together with pauses and fade effects into a single MP3.
 4. **Publish** — Pushes the MP3 to a GitHub Pages repository, updates the RSS feed XML (`feed.xml`), and commits the changes. Podcast players subscribed to the feed automatically pick up new episodes.
 
@@ -55,12 +55,21 @@ index.html          — Minimal landing page for the feed URL
 
 - Python 3.12+
 - ffmpeg (for audio processing via pydub)
-- An [Anthropic](https://console.anthropic.com/) or [OpenAI](https://platform.openai.com/) API key (for script generation)
+- An [OpenCode Zen](https://opencode.ai/docs/zen), [Anthropic](https://console.anthropic.com/), or [OpenAI](https://platform.openai.com/) API key (for script generation)
 - GitHub CLI (`gh`) authenticated (for publishing, if running locally)
 
 ## Setup
 
 ### 1. Install dependencies
+
+Recommended:
+
+```bash
+python3 -m venv .venv
+./.venv/bin/pip install -r requirements.txt
+```
+
+Or install into your current environment:
 
 ```bash
 pip install feedparser anthropic openai kokoro-onnx soundfile pydub PyYAML Jinja2 python-dotenv
@@ -78,7 +87,13 @@ sudo apt install ffmpeg
 
 ### 2. Create the config file
 
-Create `~/.claude/personalized-podcast/config.yaml`:
+The pipeline now supports repo-local config by default. The quickest setup is:
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Then edit `config.yaml` as needed:
 
 ```yaml
 show_name: "My Daily Podcast"
@@ -94,9 +109,11 @@ sources:
     - https://www.latent.space/feed
 
 llm:
-  provider: "anthropic"           # "anthropic" or "openai"
-  api_key_env: "ANTHROPIC_API_KEY"
-  model: "claude-sonnet-4-6"
+  provider: "opencode"            # "anthropic", "openai", or "opencode"
+  api_key_env: "OPENCODE_API_KEY"
+  model: "claude-sonnet-4-6"      # Any Zen model id supported by responses/messages/chat_completions
+  base_url: "https://opencode.ai/zen"
+  # api_style: "messages"         # Optional: responses | messages | chat_completions
 
 tts:
   provider: "kokoro"
@@ -114,11 +131,29 @@ retention:
 
 ### 3. Set up API keys
 
-Create `~/.claude/personalized-podcast/.env`:
+Create a repo-local `.env` file:
+
+```bash
+cp .env.example .env
+```
+
+Then add your key:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
+OPENCODE_API_KEY=...
 ```
+
+Legacy `~/.claude/personalized-podcast/config.yaml` and `.env` files are still supported as fallbacks.
+
+### OpenCode Zen provider notes
+
+`provider: "opencode"` auto-routes requests to the right Zen API family for the endpoint styles implemented in this project:
+
+- `gpt-*` models use the Zen `responses` API
+- `claude-*` models use the Zen `messages` API
+- OpenAI-compatible Zen models like `glm-5`, `kimi-k2.5`, and `minimax-m2.5` use Zen `chat/completions`
+
+If a Zen model uses one of those endpoint families but does not match the built-in prefixes, set `llm.api_style` explicitly to `responses`, `messages`, or `chat_completions`.
 
 ### 4. Set up the GitHub repo for publishing
 
@@ -129,26 +164,26 @@ Create a GitHub repo, enable GitHub Pages on the `main` branch, and add a `cover
 ### Run the full pipeline
 
 ```bash
-python scripts/run_pipeline.py
+./.venv/bin/python scripts/run_pipeline.py
 ```
 
 ### Resume from a specific stage
 
 ```bash
-python scripts/run_pipeline.py --from-stage speak      # Re-run TTS only
-python scripts/run_pipeline.py --from-stage remix      # Re-generate script + audio
+./.venv/bin/python scripts/run_pipeline.py --from-stage speak      # Re-run TTS only
+./.venv/bin/python scripts/run_pipeline.py --from-stage remix      # Re-generate script + audio
 ```
 
 ### Retry a specific date's episode
 
 ```bash
-python scripts/run_pipeline.py --from-stage speak --date 2026-03-14
+./.venv/bin/python scripts/run_pipeline.py --from-stage speak --date 2026-03-14
 ```
 
 ### Skip publishing (e.g., for local testing)
 
 ```bash
-python scripts/run_pipeline.py --skip-publish
+./.venv/bin/python scripts/run_pipeline.py --skip-publish
 ```
 
 ### Run individual stages
@@ -162,7 +197,7 @@ python scripts/publish.py  # Publish the latest MP3
 
 ## Automated Scheduling
 
-The included GitHub Actions workflow (`.github/workflows/generate-episode.yml`) runs the pipeline every 3 days at 8am Pacific. It can also be triggered manually from the Actions tab. API keys are stored as GitHub repository secrets (`ANTHROPIC_API_KEY`). The Hugging Face model cache is used to avoid re-downloading on every run.
+The included GitHub Actions workflow (`.github/workflows/generate-episode.yml`) runs the pipeline every 3 days at 8am Pacific. It can also be triggered manually from the Actions tab. API keys are stored as GitHub repository secrets (for example `OPENCODE_API_KEY` or `ANTHROPIC_API_KEY`). The Hugging Face model cache is used to avoid re-downloading on every run.
 
 ## Subscribing
 
@@ -181,8 +216,11 @@ https://youruser.github.io/your-podcast-feed/feed.xml
 | `length_minutes` | Target episode length in minutes | `10` |
 | `tone` | Writing style for the script | `"casual and conversational"` |
 | `sources.rss` | List of RSS feed URLs to pull from | (required) |
-| `llm.provider` | LLM provider (`"anthropic"` or `"openai"`) | `"anthropic"` |
-| `llm.model` | Model name | `"claude-sonnet-4-6"` |
+| `llm.provider` | LLM provider (`"anthropic"`, `"openai"`, or `"opencode"`) | `"anthropic"` |
+| `llm.api_key_env` | Environment variable containing the API key | `"ANTHROPIC_API_KEY"` |
+| `llm.model` | Model name or OpenCode Zen model id | `"claude-sonnet-4-6"` |
+| `llm.base_url` | Optional API base URL override (used by OpenCode) | `"https://opencode.ai/zen"` |
+| `llm.api_style` | Optional OpenCode endpoint override (`responses`, `messages`, `chat_completions`) | auto-detected |
 | `tts.host_a_voice` | Kokoro voice name for host A | `"af_heart"` |
 | `tts.host_b_voice` | Kokoro voice name for host B | `"am_michael"` |
 | `tts.lang_code` | Language code ("a" = American English) | `"a"` |
@@ -192,7 +230,7 @@ https://youruser.github.io/your-podcast-feed/feed.xml
 
 ## Pipeline State
 
-The pipeline tracks state in `~/.claude/personalized-podcast/state.json`:
+The pipeline tracks state in `state.json` for repo-local runs, or `PODCAST_DATA_DIR/state.json` if you override the data directory:
 
 - `last_run` — ISO timestamp of the last successful run (used to filter old articles)
 - `processed_ids` — IDs of articles already processed (prevents duplicates; capped at 500)

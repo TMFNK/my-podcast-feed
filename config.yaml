@@ -1,0 +1,31 @@
+show_name: "AI News for TMFNK"
+hosts: 2
+length_minutes: 10
+tone: "casual and conversational"
+language: "en"
+
+sources:
+  rss:
+    - https://www.bensbites.com/feed
+    - https://read.technically.dev/feed
+    - https://www.latent.space/feed
+
+llm:
+  provider: "opencode"
+  api_key_env: "OPENCODE_API_KEY"
+  model: "claude-sonnet-4-6"
+  base_url: "https://opencode.ai/zen"
+  # api_style: "messages"
+
+tts:
+  provider: "kokoro"
+  host_a_voice: "af_heart"
+  host_b_voice: "am_michael"
+  lang_code: "a"
+
+publish:
+  github_repo: "TMFNK/my-podcast-feed"
+  github_pages_url: "https://tmfnk.github.io/my-podcast-feed"
+
+retention:
+  max_episodes: 30
