@@ -10,16 +10,21 @@ Think of it like a recording studio session: each host reads their lines,
 and the sound engineer edits them together into one smooth episode.
 """
 
-import json
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 # Allow importing utils from the same directory
 sys.path.insert(0, str(Path(__file__).parent))
 from utils import get_data_dir, load_config, load_env, setup_logging
+
+# Kokoro ONNX model files — downloaded once and cached locally
+KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v0_19.onnx"
+KOKORO_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1_0.bin"
+KOKORO_CACHE_DIR = Path.home() / ".cache" / "kokoro-onnx"
 
 
 def check_ffmpeg():
@@ -46,17 +51,51 @@ def check_ffmpeg():
         )
 
 
+def ensure_kokoro_models(logger=None):
+    """
+    Downloads the Kokoro ONNX model files if they aren't already cached.
+
+    Files are stored in ~/.cache/kokoro-onnx/ and reused across runs.
+    On GitHub Actions, this directory is preserved by the HF cache step,
+    so the download only happens on the very first run.
+
+    Returns:
+        Tuple of (model_path, voices_path) as Path objects.
+    """
+    KOKORO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    model_path = KOKORO_CACHE_DIR / "kokoro-v0_19.onnx"
+    voices_path = KOKORO_CACHE_DIR / "voices-v1_0.bin"
+
+    for path, url, label in [
+        (model_path, KOKORO_MODEL_URL, "Kokoro model"),
+        (voices_path, KOKORO_VOICES_URL, "Kokoro voices"),
+    ]:
+        if not path.exists():
+            if logger:
+                logger.info(f"Downloading {label} to {path} ...")
+            urllib.request.urlretrieve(url, path)
+            if logger:
+                logger.info(f"  {label} downloaded ({path.stat().st_size / 1e6:.1f} MB)")
+        else:
+            if logger:
+                logger.info(f"  {label} already cached at {path}")
+
+    return model_path, voices_path
+
+
 def generate_audio(script_segments, config, logger=None):
     """
     Converts script segments into a single MP3 file.
 
     How it works:
     1. Checks ffmpeg is installed (needed for audio processing)
-    2. For each line in the script, generates speech with Kokoro ONNX
-    3. Collects all the audio chunks
-    4. Stitches them together with brief pauses between speakers
-    5. Adds a gentle fade-in at the start and fade-out at the end
-    6. Saves the final MP3 file
+    2. Ensures Kokoro ONNX model files are downloaded and cached
+    3. For each line in the script, generates speech with Kokoro ONNX
+    4. Collects all the audio chunks
+    5. Stitches them together with brief pauses between speakers
+    6. Adds a gentle fade-in at the start and fade-out at the end
+    7. Saves the final MP3 file
 
     Args:
         script_segments: List of {"speaker": "A"|"B", "text": "..."} dicts
@@ -75,21 +114,25 @@ def generate_audio(script_segments, config, logger=None):
     # Import audio libraries (pydub needs ffmpeg to work)
     from pydub import AudioSegment
     import soundfile as sf
-    from kokoro import KPipeline
+    from kokoro_onnx import Kokoro
 
     data_dir = get_data_dir()
     tts_config = config.get("tts", {})
 
-    # Initialize Kokoro ONNX pipeline
-    pipeline = KPipeline(lang_code=tts_config.get("lang_code", "a"))
+    # Step 2: Ensure model files are present, downloading if needed
+    model_path, voices_path = ensure_kokoro_models(logger)
 
-    # Map speakers to Kokoro voice names
+    # Initialize Kokoro ONNX — loads model into memory once, reused for all segments
+    logger.info("Loading Kokoro ONNX model...")
+    kokoro = Kokoro(str(model_path), str(voices_path))
+
+    # Map speakers to Kokoro voice names (from config.yaml tts section)
     voice_map = {
         "A": tts_config.get("host_a_voice", "af_heart"),
         "B": tts_config.get("host_b_voice", "am_michael"),
     }
 
-    # Step 2: Generate audio for each segment
+    # Step 3: Generate audio for each segment
     logger.info(f"Generating TTS for {len(script_segments)} segments...")
     audio_chunks = []
 
@@ -97,7 +140,7 @@ def generate_audio(script_segments, config, logger=None):
         for i, segment in enumerate(script_segments):
             speaker = segment["speaker"]
             text = segment["text"]
-            voice_id = voice_map.get(speaker, voice_map["A"])
+            voice = voice_map.get(speaker, voice_map["A"])
 
             speaker_name = "Alex" if speaker == "A" else "Sam"
             preview = text[:60] + "..." if len(text) > 60 else text
@@ -106,7 +149,13 @@ def generate_audio(script_segments, config, logger=None):
             )
 
             try:
-                audio, sample_rate = pipeline(text, voice=voice_id, speed=1.0)
+                # kokoro-onnx API: .create() returns (samples_array, sample_rate)
+                audio, sample_rate = kokoro.create(
+                    text,
+                    voice=voice,
+                    speed=1.0,
+                    lang="en-us",
+                )
                 chunk_path = Path(tmp_dir) / f"chunk_{i:04d}.wav"
                 sf.write(str(chunk_path), audio, sample_rate)
                 audio_chunks.append(chunk_path)
@@ -120,7 +169,7 @@ def generate_audio(script_segments, config, logger=None):
                 "No audio segments were generated. Check your config and Kokoro model files."
             )
 
-        # Step 3: Stitch all chunks together
+        # Step 4: Stitch all chunks together
         logger.info("Stitching audio segments together...")
 
         # Create silence gap between speakers (300ms of quiet)
@@ -135,13 +184,13 @@ def generate_audio(script_segments, config, logger=None):
                 combined += silence
             combined += chunk_audio
 
-        # Step 4: Add fade effects for a polished feel
+        # Step 5: Add fade effects for a polished feel
         # Gentle fade-in at the start (500ms)
         combined = combined.fade_in(500)
         # Longer fade-out at the end (1000ms) for a smooth finish
         combined = combined.fade_out(1000)
 
-        # Step 5: Export the final MP3
+        # Step 6: Export the final MP3
         timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
         episodes_dir = data_dir / "episodes"
         episodes_dir.mkdir(parents=True, exist_ok=True)

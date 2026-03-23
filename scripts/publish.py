@@ -18,15 +18,17 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from email.utils import formatdate
+from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
-from time import mktime
 
 from jinja2 import Template
 
 # Allow importing utils from the same directory
 sys.path.insert(0, str(Path(__file__).parent))
-from utils import get_data_dir, get_skill_dir, load_config, load_env, setup_logging
+from utils import get_data_dir, load_config, load_env, setup_logging
+
+# Templates live at <repo_root>/templates/, one level above scripts/
+TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
 
 def get_audio_duration(mp3_path):
@@ -72,6 +74,17 @@ def check_gh_auth(logger):
             "  Ubuntu:  sudo apt install gh\n\n"
             "Then run: gh auth login"
         )
+
+
+def _episode_timestamp(episode):
+    """
+    Parses an episode's RFC 2822 pub_date string into a UTC datetime for sorting.
+    Falls back to epoch if the date is missing or unparseable.
+    """
+    try:
+        return parsedate_to_datetime(episode["pub_date"])
+    except Exception:
+        return datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 def publish_episode(mp3_path, config, logger=None):
@@ -160,12 +173,13 @@ def publish_episode(mp3_path, config, logger=None):
         episodes = _scan_existing_episodes(repo_dir, config, logger)
         episodes.append(episode)
 
-        # Sort by date (newest first for the RSS feed)
-        episodes.sort(key=lambda e: e["pub_date"], reverse=True)
+        # Sort by parsed pub_date (newest first for the RSS feed).
+        # RFC 2822 strings like "Mon, 23 Mar 2026 08:00:00 GMT" don't sort
+        # correctly as plain strings — we parse them into datetimes first.
+        episodes.sort(key=_episode_timestamp, reverse=True)
 
         # Enforce retention limit — delete oldest episodes if we're over the limit
         max_episodes = config.get("retention", {}).get("max_episodes", 30)
-        deleted_any = False
         if len(episodes) > max_episodes:
             old_episodes = episodes[max_episodes:]
             episodes = episodes[:max_episodes]
@@ -174,11 +188,14 @@ def publish_episode(mp3_path, config, logger=None):
                 if old_file.exists():
                     old_file.unlink()
                     logger.info(f"Deleted old episode: {old['filename']}")
-                    deleted_any = True
 
-        # Render the RSS feed XML
-        skill_dir = get_skill_dir()
-        template_path = skill_dir / "templates" / "feed_template.xml"
+        # Render the RSS feed XML from the Jinja2 template
+        template_path = TEMPLATES_DIR / "feed_template.xml"
+        if not template_path.exists():
+            raise FileNotFoundError(
+                f"Feed template not found at {template_path}.\n"
+                "Expected it at templates/feed_template.xml in the repo root."
+            )
         with open(template_path, "r") as f:
             template = Template(f.read())
 
@@ -219,11 +236,6 @@ def publish_episode(mp3_path, config, logger=None):
         )
         if push_result.returncode != 0:
             raise RuntimeError(f"Git push failed: {push_result.stderr}")
-
-        # Clean up git history if we deleted old episodes
-        if deleted_any:
-            logger.info("Running git gc to clean up deleted episode history...")
-            subprocess.run(["git", "gc", "--aggressive", "--prune=now"], cwd=str(repo_dir), capture_output=True)
 
         feed_url = f"{github_pages_url}/feed.xml"
         logger.info(f"Published! Feed URL: {feed_url}")

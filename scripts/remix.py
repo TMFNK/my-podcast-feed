@@ -11,7 +11,6 @@ news and writes a podcast script that sounds natural and engaging.
 
 import json
 import os
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +19,10 @@ from jinja2 import Template
 
 # Allow importing utils from the same directory
 sys.path.insert(0, str(Path(__file__).parent))
-from utils import get_data_dir, get_skill_dir, load_config, load_env, read_state, setup_logging
+from utils import get_data_dir, load_config, load_env, read_state, setup_logging
+
+# Templates live at <repo_root>/templates/, one level above scripts/
+TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
 
 def generate_script(articles, config, logger=None):
@@ -46,15 +48,17 @@ def generate_script(articles, config, logger=None):
         logger = setup_logging()
 
     data_dir = get_data_dir()
-    skill_dir = get_skill_dir()
 
     # Pick the right prompt template based on number of hosts
     num_hosts = config.get("hosts", 2)
     template_name = f"prompt_{num_hosts}host.md"
-    template_path = skill_dir / "templates" / template_name
+    template_path = TEMPLATES_DIR / template_name
 
     if not template_path.exists():
-        raise FileNotFoundError(f"Prompt template not found: {template_path}")
+        raise FileNotFoundError(
+            f"Prompt template not found: {template_path}\n"
+            "Expected it at templates/prompt_1host.md or templates/prompt_2host.md in the repo root."
+        )
 
     logger.info(f"Using {num_hosts}-host prompt template")
 
@@ -94,6 +98,12 @@ def generate_script(articles, config, logger=None):
 
     logger.info(f"Generating script with {provider} ({model})...")
 
+    # Ensure the output directory exists before we try to write to it
+    scripts_dir = data_dir / "scripts_output"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
     # Try up to 2 times — if the first response is malformed JSON, retry with a stricter prompt
     for attempt in range(2):
         try:
@@ -109,7 +119,7 @@ def generate_script(articles, config, logger=None):
             script = _parse_script(raw_response, num_hosts, logger)
 
             # Save the script to disk for potential TTS retry later
-            output_path = data_dir / "scripts_output" / f"{datetime.now().strftime('%Y-%m-%d')}.json"
+            output_path = scripts_dir / f"{today}.json"
             with open(output_path, "w") as f:
                 json.dump(script, f, indent=2)
             logger.info(f"Script saved to {output_path}")
@@ -124,7 +134,7 @@ def generate_script(articles, config, logger=None):
             if attempt == 0:
                 logger.warning(f"Script parsing failed: {e}")
                 # Save the raw response for debugging
-                debug_path = data_dir / "scripts_output" / f"{datetime.now().strftime('%Y-%m-%d')}_raw.txt"
+                debug_path = scripts_dir / f"{today}_raw.txt"
                 with open(debug_path, "w") as f:
                     f.write(raw_response)
                 logger.info(f"Raw LLM response saved to {debug_path} for debugging")

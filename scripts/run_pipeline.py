@@ -63,7 +63,7 @@ def main():
         "--lookback-hours",
         type=int,
         default=None,
-        help="Override the default lookback window for first runs (default: 24 hours)",
+        help="Override the default lookback window for first runs (default: 72 hours)",
     )
     args = parser.parse_args()
 
@@ -119,11 +119,9 @@ def main():
             return 0
 
         # Save fetched articles for potential retry
-        articles_path = (
-            data_dir
-            / "scripts_output"
-            / f"{datetime.now().strftime('%Y-%m-%d')}_articles.json"
-        )
+        scripts_dir = data_dir / "scripts_output"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        articles_path = scripts_dir / f"{datetime.now().strftime('%Y-%m-%d')}_articles.json"
         with open(articles_path, "w") as f:
             json.dump(articles, f, indent=2)
         logger.info(f"Saved {len(articles)} articles to {articles_path}")

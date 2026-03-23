@@ -10,6 +10,7 @@ multiple newsstands before bringing them to the editor.
 """
 
 import json
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -121,7 +122,6 @@ def fetch_feeds(config, state, logger=None, lookback_hours=None):
 
                 # Strip HTML tags for cleaner text (basic approach)
                 # We keep it simple — the LLM can handle some HTML remnants
-                import re
                 content = re.sub(r"<[^>]+>", " ", content)
                 content = re.sub(r"\s+", " ", content).strip()
 

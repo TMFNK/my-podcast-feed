@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,16 +35,6 @@ def get_data_dir():
     return data_dir
 
 
-def get_skill_dir():
-    """
-    Returns the path to the skill's own directory (where SKILL.md lives).
-    This is where templates and scripts are stored.
-    """
-    # This file lives in skills/personalized-podcast/scripts/utils.py
-    # So the skill dir is two levels up
-    return Path(__file__).parent.parent
-
-
 def load_config(config_path=None):
     """
     Reads your config.yaml file and returns it as a Python dictionary.
@@ -63,9 +52,9 @@ def load_config(config_path=None):
 
     if not config_path.exists():
         raise FileNotFoundError(
-            f"Config file not found at {config_path}\n"
-            f"Run the setup first: /personalized-podcast\n"
-            f"Or copy the example: cp ~/.claude/skills/personalized-podcast/config/config.example.yaml {config_path}"
+            f"Config file not found at {config_path}\n\n"
+            f"Create it at {config_path} — see the README for the full config reference:\n"
+            f"  https://github.com/TMFNK/my-podcast-feed#setup"
         )
 
     with open(config_path, "r") as f:

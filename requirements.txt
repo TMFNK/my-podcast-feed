@@ -2,7 +2,6 @@ feedparser
 anthropic
 openai
 kokoro-onnx
-soundfile
 pydub
 PyYAML
 Jinja2

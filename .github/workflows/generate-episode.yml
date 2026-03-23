@@ -29,26 +29,21 @@ jobs:
           sudo apt-get update && sudo apt-get install -y ffmpeg
           pip install feedparser anthropic openai kokoro-onnx soundfile pydub PyYAML Jinja2 python-dotenv
 
-      - name: Set up pipeline
+      - name: Set up pipeline config and secrets
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           # Create directory structure the pipeline expects
           mkdir -p ~/.claude/personalized-podcast/{logs,scripts_output,episodes}
-          mkdir -p ~/.claude/skills/personalized-podcast/{scripts,templates}
 
-          # Copy scripts and templates from repo
-          cp scripts/*.py ~/.claude/skills/personalized-podcast/scripts/
-          cp templates/* ~/.claude/skills/personalized-podcast/templates/
-
-          # Create .env
+          # Create .env with API keys
           cat > ~/.claude/personalized-podcast/.env << EOF
           ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
           EOF
 
           # Create config.yaml
           cat > ~/.claude/personalized-podcast/config.yaml << 'EOF'
-          show_name: "AI News for Zara"
+          show_name: "AI News for TMFNK"
           hosts: 2
           length_minutes: 10
           tone: "casual and conversational"
@@ -82,14 +77,14 @@ jobs:
             echo "Restored state from repo"
           fi
 
-      - name: Cache Hugging Face models
+      - name: Cache Kokoro ONNX models
         uses: actions/cache@v4
         with:
-          path: ~/.cache/huggingface
-          key: hf-kokoro-${{ runner.os }}
+          path: ~/.cache/kokoro-onnx
+          key: kokoro-onnx-${{ runner.os }}
 
       - name: Run pipeline (fetch + remix + speak)
-        run: python ~/.claude/skills/personalized-podcast/scripts/run_pipeline.py --skip-publish --lookback-hours 72
+        run: python scripts/run_pipeline.py --skip-publish --lookback-hours 72
 
       - name: Publish episode to GitHub Pages
         run: |
@@ -111,7 +106,7 @@ jobs:
           python << 'PYEOF'
           import json, os
           from datetime import datetime, timezone
-          from email.utils import formatdate
+          from email.utils import formatdate, parsedate_to_datetime
           from pathlib import Path
           from jinja2 import Template
           from pydub import AudioSegment
@@ -120,7 +115,7 @@ jobs:
           episodes = json.loads(Path("episodes.json").read_text()) if Path("episodes.json").exists() else []
           existing = {e["filename"] for e in episodes}
 
-          # Add new episodes
+          # Add new episodes found in the repo's episodes/ directory
           for mp3 in sorted(Path("episodes").glob("*.mp3")):
               if mp3.name not in existing:
                   audio = AudioSegment.from_mp3(str(mp3))
@@ -128,7 +123,7 @@ jobs:
                   duration = f"{int(secs // 60)}:{int(secs % 60):02d}"
                   now = datetime.now(timezone.utc)
                   episodes.append({
-                      "title": f"AI News for Zara \u2014 {now.strftime('%B %d, %Y')}",
+                      "title": f"AI News for TMFNK \u2014 {now.strftime('%B %d, %Y')}",
                       "description": f"Your personalized podcast for {now.strftime('%B %d, %Y')}",
                       "pub_date": formatdate(timeval=now.timestamp(), localtime=False, usegmt=True),
                       "filename": mp3.name,
@@ -137,13 +132,21 @@ jobs:
                       "guid": f"https://tmfnk.github.io/my-podcast-feed/episodes/{mp3.name}",
                   })
 
-          episodes.sort(key=lambda e: e["pub_date"], reverse=True)
+          # Sort by parsed datetime — RFC 2822 strings don't sort correctly as plain strings
+          def episode_timestamp(ep):
+              try:
+                  return parsedate_to_datetime(ep["pub_date"])
+              except Exception:
+                  return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+          episodes.sort(key=episode_timestamp, reverse=True)
           episodes = episodes[:30]
           Path("episodes.json").write_text(json.dumps(episodes, indent=2))
 
-          tmpl = Path(os.path.expanduser("~/.claude/skills/personalized-podcast/templates/feed_template.xml")).read_text()
+          # Templates live in the repo checkout at templates/feed_template.xml
+          tmpl = Path("templates/feed_template.xml").read_text()
           feed = Template(tmpl).render(
-              show_name="AI News for Zara",
+              show_name="AI News for TMFNK",
               github_pages_url="https://tmfnk.github.io/my-podcast-feed",
               language="en",
               episodes=episodes,
@@ -152,11 +155,12 @@ jobs:
           print(f"Feed updated: {len(episodes)} episodes")
           PYEOF
 
+          # Save pipeline state so next run knows when we last processed
+          cp ~/.claude/personalized-podcast/state.json ./state.json 2>/dev/null || true
+
           # Commit and push
           git config user.name "Podcast Bot"
           git config user.email "bot@noreply.github.com"
-          # Save pipeline state so next run knows when we last processed
-          cp ~/.claude/personalized-podcast/state.json ./state.json 2>/dev/null || true
           git add episodes/ episodes.json feed.xml state.json
           git commit -m "Add episode: $(date +%Y-%m-%d)" || echo "Nothing to commit"
           git push
