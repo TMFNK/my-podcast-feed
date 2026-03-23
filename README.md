@@ -6,7 +6,7 @@ An automated 4-stage pipeline (Fetch → Remix → Speak → Publish) that conve
 
 - Pulls articles from configured RSS sources (e.g. Ben's Bites, Latent Space, Technically)
 - Generates a conversational podcast script via an LLM (Claude or GPT) using Jinja2 prompt templates
-- Converts the script to audio using ElevenLabs TTS with distinct voices per host
+- Converts the script to audio using Kokoro ONNX TTS with distinct voices per host
 - Publishes the MP3 and an updated RSS feed to GitHub Pages so podcast players auto-download new episodes
 - Runs on a 3-day GitHub Actions cron schedule or manually via CLI It fetches articles from configured sources, generates a natural-sounding podcast script with an LLM, converts it to audio via text-to-speech, and publishes it as a subscribable RSS feed on GitHub Pages.
 
@@ -16,7 +16,7 @@ Each run of the pipeline executes four stages:
 
 1. **Fetch** — Pulls new articles from configured RSS feeds (e.g., tech newsletters, AI blogs). Filters out previously processed articles using a persistent state file.
 2. **Remix** — Sends the fetched articles to an LLM (Anthropic Claude or OpenAI GPT) with a prompt template that instructs it to write a podcast conversation script. Supports single-host monologue or two-host conversational formats.
-3. **Speak** — Converts each line of the script to audio using ElevenLabs text-to-speech. Each host gets a distinct voice. Audio segments are stitched together with pauses and fade effects into a single MP3.
+3. **Speak** — Converts each line of the script to audio using Kokoro ONNX text-to-speech (offline, no API needed). Each host gets a distinct voice. Audio segments are stitched together with pauses and fade effects into a single MP3.
 4. **Publish** — Pushes the MP3 to a GitHub Pages repository, updates the RSS feed XML (`feed.xml`), and commits the changes. Podcast players subscribed to the feed automatically pick up new episodes.
 
 ## Who It's For
@@ -56,7 +56,6 @@ index.html          — Minimal landing page for the feed URL
 - Python 3.12+
 - ffmpeg (for audio processing via pydub)
 - An [Anthropic](https://console.anthropic.com/) or [OpenAI](https://platform.openai.com/) API key (for script generation)
-- An [ElevenLabs](https://elevenlabs.io/) API key (for text-to-speech)
 - GitHub CLI (`gh`) authenticated (for publishing, if running locally)
 
 ## Setup
@@ -64,7 +63,7 @@ index.html          — Minimal landing page for the feed URL
 ### 1. Install dependencies
 
 ```bash
-pip install feedparser anthropic openai elevenlabs pydub PyYAML Jinja2 python-dotenv
+pip install feedparser anthropic openai kokoro-onnx soundfile pydub PyYAML Jinja2 python-dotenv
 ```
 
 On macOS:
@@ -100,10 +99,10 @@ llm:
   model: "claude-sonnet-4-6"
 
 tts:
-  provider: "elevenlabs"
-  api_key_env: "ELEVENLABS_API_KEY"
-  host_a_voice_id: "CwhRBWXzGAHq8TQ4Fs17"
-  host_b_voice_id: "EXAVITQu4vr4xnSDxMaL"
+  provider: "kokoro"
+  host_a_voice: "af_heart"        # female voice — see VOICES.md for full list
+  host_b_voice: "am_michael"      # male voice — see VOICES.md for full list
+  lang_code: "a"                  # "a" = American English
 
 publish:
   github_repo: "youruser/your-podcast-feed"
@@ -119,7 +118,6 @@ Create `~/.claude/personalized-podcast/.env`:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-ELEVENLABS_API_KEY=...
 ```
 
 ### 4. Set up the GitHub repo for publishing
@@ -164,7 +162,7 @@ python scripts/publish.py  # Publish the latest MP3
 
 ## Automated Scheduling
 
-The included GitHub Actions workflow (`.github/workflows/generate-episode.yml`) runs the pipeline every 3 days at 8am Pacific. It can also be triggered manually from the Actions tab. API keys are stored as GitHub repository secrets (`ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`).
+The included GitHub Actions workflow (`.github/workflows/generate-episode.yml`) runs the pipeline every 3 days at 8am Pacific. It can also be triggered manually from the Actions tab. API keys are stored as GitHub repository secrets (`ANTHROPIC_API_KEY`). The Hugging Face model cache is used to avoid re-downloading on every run.
 
 ## Subscribing
 
@@ -185,8 +183,9 @@ https://youruser.github.io/your-podcast-feed/feed.xml
 | `sources.rss` | List of RSS feed URLs to pull from | (required) |
 | `llm.provider` | LLM provider (`"anthropic"` or `"openai"`) | `"anthropic"` |
 | `llm.model` | Model name | `"claude-sonnet-4-6"` |
-| `tts.host_a_voice_id` | ElevenLabs voice ID for host A | `"CwhRBWXzGAHq8TQ4Fs17"` |
-| `tts.host_b_voice_id` | ElevenLabs voice ID for host B | `"EXAVITQu4vr4xnSDxMaL"` |
+| `tts.host_a_voice` | Kokoro voice name for host A | `"af_heart"` |
+| `tts.host_b_voice` | Kokoro voice name for host B | `"am_michael"` |
+| `tts.lang_code` | Language code ("a" = American English) | `"a"` |
 | `publish.github_repo` | GitHub repo for hosting | (required) |
 | `publish.github_pages_url` | Base URL for GitHub Pages | (required) |
 | `retention.max_episodes` | Max episodes to keep (oldest deleted) | `30` |

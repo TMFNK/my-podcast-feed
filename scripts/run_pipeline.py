@@ -6,7 +6,7 @@ This is the "conductor" that coordinates the whole orchestra:
   Fetch → Remix → Speak → Publish
 
 You can run the full pipeline, or restart from a specific stage if
-something failed partway through (e.g., TTS quota ran out but the
+something failed partway through (e.g., TTS errored but the
 script was already generated — just retry from "speak").
 
 Usage:
@@ -24,7 +24,14 @@ from pathlib import Path
 
 # Allow importing from the same directory
 sys.path.insert(0, str(Path(__file__).parent))
-from utils import get_data_dir, load_config, load_env, read_state, setup_logging, write_state
+from utils import (
+    get_data_dir,
+    load_config,
+    load_env,
+    read_state,
+    setup_logging,
+    write_state,
+)
 
 
 def main():
@@ -41,7 +48,7 @@ def main():
     parser.add_argument(
         "--date",
         help="Date to use for loading saved data (YYYY-MM-DD). "
-             "Used with --from-stage to retry a specific day's episode.",
+        "Used with --from-stage to retry a specific day's episode.",
     )
     parser.add_argument(
         "--config-path",
@@ -99,7 +106,9 @@ def main():
         logger.info("\n--- Stage 1: FETCH ---")
         from fetch import fetch_feeds
 
-        articles = fetch_feeds(config, state, logger, lookback_hours=args.lookback_hours)
+        articles = fetch_feeds(
+            config, state, logger, lookback_hours=args.lookback_hours
+        )
 
         if not articles:
             logger.info("No new articles found. Skipping episode generation.")
@@ -110,7 +119,11 @@ def main():
             return 0
 
         # Save fetched articles for potential retry
-        articles_path = data_dir / "scripts_output" / f"{datetime.now().strftime('%Y-%m-%d')}_articles.json"
+        articles_path = (
+            data_dir
+            / "scripts_output"
+            / f"{datetime.now().strftime('%Y-%m-%d')}_articles.json"
+        )
         with open(articles_path, "w") as f:
             json.dump(articles, f, indent=2)
         logger.info(f"Saved {len(articles)} articles to {articles_path}")
@@ -129,7 +142,9 @@ def main():
             if articles_path.exists():
                 with open(articles_path, "r") as f:
                     articles = json.load(f)
-                logger.info(f"Loaded {len(articles)} saved articles from {articles_path}")
+                logger.info(
+                    f"Loaded {len(articles)} saved articles from {articles_path}"
+                )
             else:
                 raise FileNotFoundError(
                     f"No saved articles found for {date_str}. "
@@ -148,6 +163,7 @@ def main():
         if script is None:
             # Load a previously saved script
             from remix import load_saved_script
+
             date_str = args.date or datetime.now().strftime("%Y-%m-%d")
             script = load_saved_script(date_str)
             logger.info(f"Loaded saved script for {date_str} ({len(script)} segments)")
@@ -209,6 +225,7 @@ if __name__ == "__main__":
     except Exception as e:
         # Make sure errors are logged, not just printed
         import logging
+
         logger = logging.getLogger("personalized-podcast")
         logger.error(f"Pipeline failed: {e}", exc_info=True)
         print(f"\nError: {e}", file=sys.stderr)

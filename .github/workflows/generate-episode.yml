@@ -3,7 +3,7 @@ name: Generate Podcast Episode
 on:
   schedule:
     # Every 3 days at 8am Pacific (3pm UTC)
-    - cron: '0 15 */3 * *'
+    - cron: "0 15 */3 * *"
   workflow_dispatch:
     # Allows manual trigger from GitHub Actions tab
 
@@ -22,17 +22,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install system and Python dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install feedparser anthropic openai elevenlabs pydub PyYAML Jinja2 python-dotenv
+          pip install feedparser anthropic openai kokoro-onnx soundfile pydub PyYAML Jinja2 python-dotenv
 
       - name: Set up pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
         run: |
           # Create directory structure the pipeline expects
           mkdir -p ~/.claude/personalized-podcast/{logs,scripts_output,episodes}
@@ -45,7 +44,6 @@ jobs:
           # Create .env
           cat > ~/.claude/personalized-podcast/.env << EOF
           ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-          ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
           EOF
 
           # Create config.yaml
@@ -65,13 +63,13 @@ jobs:
             api_key_env: "ANTHROPIC_API_KEY"
             model: "claude-sonnet-4-6"
           tts:
-            provider: "elevenlabs"
-            api_key_env: "ELEVENLABS_API_KEY"
-            host_a_voice_id: "CwhRBWXzGAHq8TQ4Fs17"
-            host_b_voice_id: "EXAVITQu4vr4xnSDxMaL"
+            provider: "kokoro"
+            host_a_voice: "af_heart"
+            host_b_voice: "am_michael"
+            lang_code: "a"
           publish:
-            github_repo: "zarazhangrui/my-podcast-feed"
-            github_pages_url: "https://zarazhangrui.github.io/my-podcast-feed"
+            github_repo: "tmfnk/my-podcast-feed"
+            github_pages_url: "https://tmfnk.github.io/my-podcast-feed"
           retention:
             max_episodes: 30
           EOF
@@ -83,6 +81,12 @@ jobs:
             cp state.json ~/.claude/personalized-podcast/state.json
             echo "Restored state from repo"
           fi
+
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-kokoro-${{ runner.os }}
 
       - name: Run pipeline (fetch + remix + speak)
         run: python ~/.claude/skills/personalized-podcast/scripts/run_pipeline.py --skip-publish --lookback-hours 72
@@ -130,7 +134,7 @@ jobs:
                       "filename": mp3.name,
                       "file_size": str(mp3.stat().st_size),
                       "duration": duration,
-                      "guid": f"https://zarazhangrui.github.io/my-podcast-feed/episodes/{mp3.name}",
+                      "guid": f"https://tmfnk.github.io/my-podcast-feed/episodes/{mp3.name}",
                   })
 
           episodes.sort(key=lambda e: e["pub_date"], reverse=True)
@@ -140,7 +144,7 @@ jobs:
           tmpl = Path(os.path.expanduser("~/.claude/skills/personalized-podcast/templates/feed_template.xml")).read_text()
           feed = Template(tmpl).render(
               show_name="AI News for Zara",
-              github_pages_url="https://zarazhangrui.github.io/my-podcast-feed",
+              github_pages_url="https://tmfnk.github.io/my-podcast-feed",
               language="en",
               episodes=episodes,
           )

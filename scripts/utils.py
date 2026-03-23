@@ -92,7 +92,6 @@ def load_env(env_path=None):
             f"Environment file not found at {env_path}\n"
             f"Create it with your API keys:\n"
             f"  ANTHROPIC_API_KEY=sk-ant-...\n"
-            f"  ELEVENLABS_API_KEY=..."
         )
 
     load_dotenv(env_path)
