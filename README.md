@@ -1,3 +1,5 @@
+[![AI Slop Inside](https://sladge.net/badge.svg)](https://sladge.net)
+
 # my-podcast-feed
 
 Forked from [zarazhangrui/my-podcast-feed](https://github.com/zarazhangrui/my-podcast-feed) by [@zarazhangrui](https://github.com/zarazhangrui).
