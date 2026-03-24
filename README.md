@@ -1,7 +1,6 @@
-[![AI Slop Inside](https://sladge.net/badge.svg)](https://sladge.net)
-
 # my-podcast-feed
 
+[![AI Slop Inside](https://sladge.net/badge.svg)](https://sladge.net)
 Forked from [zarazhangrui/my-podcast-feed](https://github.com/zarazhangrui/my-podcast-feed) by [@zarazhangrui](https://github.com/zarazhangrui).
 
 An automated 4-stage pipeline (Fetch → Remix → Speak → Publish) that converts RSS newsletter feeds into personalized podcast episodes using AI.
@@ -238,3 +237,8 @@ The pipeline tracks state in `state.json` for repo-local runs, or `PODCAST_DATA_
 - `processed_ids` — IDs of articles already processed (prevents duplicates; capped at 500)
 
 State is also committed to the repo so GitHub Actions can restore it between runs.
+
+---
+
+Originally created by [Zara Zhangrui](https://x.com/zarazhangrui). Forked and adapted for Codex by [TMFNK](https://x.com/4tmfnk).
+
